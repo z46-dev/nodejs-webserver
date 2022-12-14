@@ -16,6 +16,72 @@ function responsify(response, server) {
     return response;
 }
 
+function getMimeType(file) {
+    let ext = file.split(".").pop();
+    switch (ext) {
+        case "html":
+            return "text/html";
+        case "css":
+            return "text/css";
+        case "js":
+            return "text/javascript";
+        case "json":
+            return "application/json";
+        case "png":
+            return "image/png";
+        case "jpg":
+            return "image/jpg";
+        case "gif":
+            return "image/gif";
+        case "svg":
+            return "image/svg+xml";
+        case "ico":
+            return "image/x-icon";
+        case "ttf":
+            return "font/ttf";
+        case "otf":
+            return "font/otf";
+        case "woff":
+            return "font/woff";
+        case "woff2":
+            return "font/woff2";
+        case "eot":
+            return "font/eot";
+        case "wav":
+            return "audio/wav";
+        case "mp3":
+            return "audio/mpeg";
+        case "ogg":
+            return "audio/ogg";
+        case "pdf":
+            return "application/pdf";
+        case "zip":
+            return "application/zip";
+        case "rar":
+            return "application/x-rar-compressed";
+        case "7z":
+            return "application/x-7z-compressed";
+        case "doc":
+            return "application/msword";
+        case "docx":
+            return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        case "xls":
+            return "application/vnd.ms-excel";
+        case "xlsx":
+            return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        case "ppt":
+            return "application/vnd.ms-powerpoint";
+        case "pptx":
+            return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        case "xml":
+            return "application/xml";
+        case "txt":
+            return "text/plain";
+        default:
+            return "application/octet-stream";
+    }
+}
+
 const pageNotFound = `
 <!DOCTYPE html>
 <html>
@@ -90,15 +156,8 @@ class Server {
                 this.getMethods.get(path)(request, response);
                 return;
             }
-            if (this.postMethods.has(path) && request.method === "POST") {
-                let body = "";
-                request.on("data", (chunk) => {
-                    body += chunk;
-                });
-                request.on("end", () => {
-                    request.body = body;
-                    this.postMethods.get(path)(request, response);
-                });
+            if (this.postMethods.has(path)) {
+                this.postMethods.get(path)(request, response);
                 return;
             }
             if (this.publicDirectory !== -1) {
@@ -109,6 +168,7 @@ class Server {
                         response.end(pageNotFound);
                         return;
                     }
+                    response.setHeader("Content-Type", getMimeType(filePath));
                     response.send(fs.readFileSync(filePath));
                     return;
                 }
@@ -131,7 +191,7 @@ class Server {
     post(rout, callback) {
         this.postMethods.set(rout, callback);
     }
-    publicize(path, mainPath) {
+    publicize(path) {
         this.publicDirectory = path;
     }
 }
