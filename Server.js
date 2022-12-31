@@ -1,4 +1,6 @@
 import http from "http";
+import https from "https";
+import net from "net";
 import url from "url";
 import fs from "fs";
 
@@ -134,8 +136,11 @@ const pageNotFound = `
 </html>
 `;
 
+const redirectAddress = 9998;
+const httpsAddress = 9999;
+
 class Server {
-    constructor(port, accessControlAllowOrigin = "*") {
+    constructor(port, options = {}, accessControlAllowOrigin = "*") {
         if (!Number.isFinite(port) || port !== Math.round(port)) {
             throw new RangeError("The argument 'port' must be a valid integer!");
         }
@@ -148,42 +153,79 @@ class Server {
             "Access-Control-Max-Age": 2592000
         };
         this.publicDirectory = -1;
-        this.server = http.createServer((request, response) => {
-            let parsedURL = url.parse(request.url),
-                path = parsedURL.pathname.replace(/\/+$/, "") || "/";
-            response = responsify(response, this);
-            if (this.getMethods.has(path)) {
-                this.getMethods.get(path)(request, response);
-                return;
-            }
-            if (this.postMethods.has(path)) {
-                this.postMethods.get(path)(request, response);
-                return;
-            }
-            if (this.publicDirectory !== -1) {
-                let filePath = this.publicDirectory + (path === "/" ? "/index.html" : path);
-                if (fs.existsSync(filePath)) {
-                    if (fs.statSync(filePath).isDirectory()) {
-                        response.writeHead(404, this.responseHeaders);
-                        response.end(pageNotFound);
-                        return;
-                    }
-                    response.setHeader("Content-Type", getMimeType(filePath));
-                    response.send(fs.readFileSync(filePath));
+        this.https = false;
+        if (options.key && options.cert) {
+            this.https = true;
+            this.httpsServer = https.createServer(options, (request, response) => this.handle(request, response));
+            this.httpServer = http.createServer(function httpConnection(request, response) {
+                response.writeHead(301, { "Location": "https://" + request.headers["host"] + request.url });
+                response.end();
+            });
+            this.netServer = net.createServer(function tcpConnection(socket) {
+                socket.once("data", function (buffer) {
+                    const proxy = net.createConnection(buffer[0] === 22 ? httpsAddress : redirectAddress, function () {
+                        proxy.write(buffer);
+                        socket.pipe(proxy).pipe(socket);
+                    });
+                });
+            });
+        } else {
+            this.server = http.createServer((request, response) => this.handle(request, response));
+        }
+    }
+    handle(request, response) {
+        let parsedURL = url.parse(request.url),
+            path = parsedURL.pathname.replace(/\/+$/, "") || "/";
+        response = responsify(response, this);
+        if (this.getMethods.has(path)) {
+            this.getMethods.get(path)(request, response);
+            return;
+        }
+        if (this.postMethods.has(path)) {
+            this.postMethods.get(path)(request, response);
+            return;
+        }
+        if (this.publicDirectory !== -1) {
+            let filePath = this.publicDirectory + (path === "/" ? "/index.html" : path);
+            if (fs.existsSync(filePath)) {
+                if (fs.statSync(filePath).isDirectory()) {
+                    response.writeHead(404, this.responseHeaders);
+                    response.end(pageNotFound);
                     return;
                 }
+                response.setHeader("Content-Type", getMimeType(filePath));
+                response.send(fs.readFileSync(filePath));
+                return;
             }
-            response.writeHead(404, this.responseHeaders);
-            response.end(pageNotFound);
-        });
+        }
+        response.writeHead(404, this.responseHeaders);
+        response.end(pageNotFound);
     }
     listen(callback = function() {}) {
-        this.server.listen(this.port, () => {
-            callback({
-                port: this.port,
-                time: Date.now()
+        if (this.https) {
+            let complete = 0,
+                port = this.port,
+                cb = () => {
+                    complete++;
+                    if (complete === 3) {
+                        callback({
+                            port: port,
+                            time: Date.now(),
+                            https: true
+                        });
+                    }
+                }
+            this.httpsServer.listen(httpsAddress, cb);
+            this.httpServer.listen(redirectAddress, cb);
+            this.netServer.listen(port, cb);
+        } else {
+            this.server.listen(this.port, () => {
+                callback({
+                    port: this.port,
+                    time: Date.now()
+                });
             });
-        });
+        }
     }
     get(rout, callback) {
         this.getMethods.set(rout, callback);
